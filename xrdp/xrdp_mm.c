@@ -37,6 +37,10 @@
 #include "xrdp_channel.h"
 #include <limits.h>
 
+#if defined(XRDP_OPENH264)
+#include "xrdp_encoder_openh264.h"
+#endif
+
 /* Forward declarations */
 static int
 xrdp_mm_chansrv_connect(struct xrdp_mm *self, const char *port);
@@ -45,6 +49,29 @@ xrdp_mm_connect_sm(struct xrdp_mm *self);
 
 static int
 xrdp_mm_send_unicode_shutdown(struct xrdp_mm *self, struct trans *trans);
+
+/******************************************************************************/
+/**
+ * Checks H.264 has been correctly linked
+ *
+ * @return Boolean (!= 0 => linking OK)
+ * This only really applies to OpenH264. For other configurations (including
+ * no H.264) we assume the linking is correct */
+static int
+check_h264_ok(void)
+{
+#if defined(XRDP_OPENH264)
+    int rv = xrdp_encoder_openh264_install_ok();
+    if (!rv)
+    {
+        LOG(LOG_LEVEL_ERROR, "OpenH264 Codec is not installed correctly. "
+            "H.264 will not be used");
+    }
+#else
+    int rv = 1;
+#endif
+    return rv;
+}
 
 /*****************************************************************************/
 struct xrdp_mm *
@@ -61,6 +88,10 @@ xrdp_mm_create(struct xrdp_wm *owner)
 
     self->uid = -1; /* Never good to default UIDs to 0 */
 
+    if (self->wm->client_info->h264_codec_id != 0 && !check_h264_ok())
+    {
+        self->wm->client_info->h264_codec_id = 0;
+    }
     LOG_DEVEL(LOG_LEVEL_INFO, "xrdp_mm_create: bpp %d mcs_connection_type %d "
               "jpeg_codec_id %d v3_codec_id %d rfx_codec_id %d "
               "h264_codec_id %d",
@@ -1440,6 +1471,9 @@ xrdp_mm_egfx_caps_advertise(void *user, int caps_count,
         }
     }
 
+#ifdef XRDP_H264
+    int h264_ok = check_h264_ok();
+#endif
     int best_index = -1;
     struct xrdp_tconfig_gfx_codec_order *co = &self->wm->gfx_config->codec;
     char cobuff[64];
@@ -1449,7 +1483,7 @@ xrdp_mm_egfx_caps_advertise(void *user, int caps_count,
     for (index = 0 ; index < co->codec_count ; ++index)
     {
 #if defined(XRDP_H264)
-        if (co->codecs[index] == XTC_H264 && best_h264_index >= 0)
+        if (h264_ok && co->codecs[index] == XTC_H264 && best_h264_index >= 0)
         {
             LOG(LOG_LEVEL_INFO, "Matched H264 mode");
             best_index = best_h264_index;
